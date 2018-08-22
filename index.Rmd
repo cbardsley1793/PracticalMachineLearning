@@ -1,0 +1,169 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Cherie Bardsley"
+date: "August 20, 2018"
+output:
+  html_document:
+    keep_md: TRUE
+---
+
+# Prediction Assignment
+
+## Background
+Using devices such as *Jawbone Up, Nike, FuelBand,* and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how *much* of a particular activity they do, but they rarely quantify *how well they do it.*
+
+In this project, the goal was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from this website: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Project Rubric
+The goal of this project is to predict the manner in which the participants did the exercise. This is the 'classe' variable in the training set. We can use any of the other variables to predict with.
+
+This report will describe how our model was built, how we used cross validation, what we think the expected out of sample error is, and why we made the choices we did. We will use our prediction model to predict 20 different test cases.
+
+The submission should consist of a link to a Gihub repo with the R markdown and compiled HTML file describing the analysis. The text of the writeup should be constrained to < 2000 words and the number of figures should be less than 5. To make it easier for the graders, we will submit a repo with a gh-pages branch so the HTML page can be viewed online.
+
+## Loading the R Packages and Preparing the Data
+
+### Load the Required R Packages
+```{r}
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+### Get the Data
+```{r}
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+### Explore the Data
+```{r}
+dim(training); dim(testing)
+```
+
+The raw training data set has 19622 observations and 160 variables. The raw testing data set has 20 observations and 160 variables.
+
+The outcome variable 'classe' is the last column in the raw training data set.
+
+### Clean the Data
+In exploring the data, the first thing we noticed is that many of the variables have extremely low variances. There is little information in these variables so we will use the caret package nearZeroVar() function to remove them from both the training and testing data sets.
+
+```{r}
+nzv <- nearZeroVar(training, saveMetrics = TRUE)
+training <- training[, nzv$nzv == FALSE]
+nzv <- nearZeroVar(testing, saveMetrics = TRUE)
+testing <- testing[, nzv$nzv == FALSE]
+dim(training); dim(testing)
+```
+
+After running nearZeroVar() our modified training data set now has 19622 observations and 100 variables.  Our modified testing data set now has 20 observations and 59 variables.
+
+Next, we noticed that some of the columns in the training set have NA or missing values. We will delete these columns as they will not contribute to our prediction.
+```{r}
+trainingClean1 <- training[, colSums(is.na(training)) == 0]
+testingClean1 <- testing[, colSums(is.na(testing)) == 0]
+```
+
+We also noticed the first seven columns appear to contain data about the participants, timestamps, and windows. We removed these columns as they will not contribute to our prediction for the outcome 'classe'.
+```{r}
+trainingClean2 <- trainingClean1[, -c(1:7)]
+testingClean2 <- testingClean1[, -c(1:7)]
+```
+
+Our last step will be to rename our cleaned training and testing data sets.
+```{r}
+trainingCleaned <- trainingClean2
+testingCleaned <- testingClean2
+testing <- testingCleaned
+dim(trainingCleaned); dim(testing)
+```
+
+Our cleaned training ('trainingCleaned') and testing ('testing') data sets now have 52 columns.  The 'trainingCleaned' set has 19622 observations and the last column in the data set is our outcome variable 'classe'.  The 'testing' set has 20 observations and the last column in the data set is the 'problem_id' variable.  
+
+### Data Splitting
+To get the out of sample errors, we need to split the 'trainingCleaned' data set into a 'training' set, which we and a 'validation' set.
+
+```{r}
+set.seed(33533)
+inTrain <- createDataPartition(trainingCleaned$classe, p = 0.7, list = FALSE)
+training <- trainingCleaned[inTrain,]
+validation <- trainingCleaned[-inTrain,]
+```
+
+## Machine Learning Model
+We will use three different models to predict the manner in which the participants did the exercise, Classification Trees, Boosting and Random Forests, and use the most accurate model for our prediction on the testing set.
+
+### Cross Validation Method
+We will use 5-fold cross validation to limit overfitting and improve computational efficiency of the models.
+```{r}
+# Set the number of folds to 5
+control <- trainControl(method = "cv", number = 5)
+```
+
+### Classification Trees
+```{r}
+# Fit the model
+modCT <- train(classe ~ ., method = "rpart", data = training, trControl = control)
+print(modCT, digits = 4)
+# Plot the classification tree
+fancyRpartPlot(modCT$finalModel)
+# Predict on the validation set
+predCT <- predict(modCT, validation)
+# Display the prediction results using the confusionMatrix function
+confCT <- confusionMatrix(validation$classe, predCT)
+confCT
+```
+
+The accuracy of this first model is very low at 0.4848 and the out of sample error rate is 0.5152. Therefore, we conclude the Classification Trees model does not predict the 'classe' outcome very well.
+
+### Gradient Boosting
+```{r}
+# Fit the model
+modGBM <- train(classe ~ ., method = "gbm", data = training, verbose = FALSE)
+print(modGBM)
+# Plot the Boosting Model
+plot(modGBM)
+# Predict on the validation set
+predGBM <- predict(modGBM, validation)
+# Display the prediction results using the confusionMatrix function
+confGBM <- confusionMatrix(validation$classe, predGBM)
+confGBM
+```
+
+The Gradient Boosting model performed much better than the Classification Trees model with 0.963 accuracy and an out of sample error rate of 0.037 using cross validation with 5 folds.
+
+### Random Forests
+We will now move to the random forest method to see if it performs better than the other two models.
+
+```{r}
+# Fit the model
+modRF <- train(classe ~ ., method = "rf", data = training, trControl = control)
+print(modRF, digits = 4)
+# Plot the accuracy of the model vs. the number of predictors
+plot(modRF, main = "Random Forest Model Accuracy vs. Number of Predictors")
+# Predict on the validation set
+predRF <- predict(modRF, validation)
+# Display the prediction results using the confusionMatrix function
+confCT <- confusionMatrix(validation$classe, predRF)
+confCT
+# Plot the errors vs. the number of trees for the final model
+plot(modRF$finalModel, main = "Random Forest Model Errors vs. Number of Trees")
+```
+
+The Random Forest model performed better than both the Classification Trees and Gradient Boosting models with 0.9949 accuracy and an out of sample error rate of 0.0051 using cross validation with 5 folds.
+
+## Prediction on the Testing Set Using the Best (Most Accurate) Model
+
+As the Random Forest model is the most accurate of the three models, we will use it to predict the values of 'classe' on the testing data set.
+
+```{r}
+predTest <- predict(modRF, newdata = testing)
+predTest
+```
